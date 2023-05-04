@@ -26,4 +26,38 @@ def test_get_posts():
 
     assert isinstance(response.json()["posts"],list)
 
-    assert len(response.json()["posts"]) == 5
+    assert len(response.json()["posts"]) == 9
+
+
+
+def test_delete_post():
+    data = {
+        "title": "Test Title",
+        "content": "Test Content",
+        "created_at": datetime.utcnow().isoformat()
+    }
+
+    data_response = client.post('/blog',json=data)
+
+    response = client.delete(f"/blog/{data_response.json()['id']}")
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "post deleted"
+
+
+def test_get_post_detail():
+    data = {
+        "title": "Post Detail",
+        "content": "Test Content",
+        "created_at": datetime.utcnow().isoformat()
+    }
+
+    data_response = client.post('/blog',json=data)
+
+    response = client.get(f"/post/{data_response.json()['id']}")
+
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "Post Detail"
+    assert response.json()['content'] == "Test Content"
+

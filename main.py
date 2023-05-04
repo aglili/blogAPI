@@ -51,7 +51,7 @@ def get_post(post_id:int,db:Session=Depends(get_db)):
 
     if not post:
         raise HTTPException(status_code=404,detail="Post Not Found")
-    return {"post":post}
+    return post
     
 @app.put('/posts/{post_id}')
 def update_post(post_id:int,post:PostUpdate,db:Session=Depends(get_db)):
