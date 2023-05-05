@@ -29,3 +29,8 @@ class Post(BaseModel):
 
 class PostList(BaseModel):
     posts: List[Post]
+
+
+class UserCreate(BaseModel):
+    username : str
+    password : str
