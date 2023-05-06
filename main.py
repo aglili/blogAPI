@@ -1,26 +1,27 @@
 from fastapi import FastAPI,Depends,HTTPException
-from schema import Post,PostUpdate,UserCreate
+from schema import Post,PostUpdate,UserCreate,Token,TokenData,User
 import models
 from database import engine,session_local
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime,timedelta
 from fastapi.security import HTTPBasic,HTTPBasicCredentials
 from jose import jwt,JWTError
 from dotenv import load_dotenv
 from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer,OAuth2PasswordRequestForm
 import os
-from datetime import timedelta
-import secrets
+from typing import Annotated
+
+
 
 
 pwd_context = CryptContext(schemes=['bcrypt'],deprecated='auto')
 
-auth_scheme  = OAuth2PasswordBearer(tokenUrl='token')
+auth_scheme  = OAuth2PasswordBearer(tokenUrl='login')
 
 load_dotenv()
 
-SECRET_KEY = secrets.token_urlsafe(32)
+SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM")
 ACCESS_TOKEN_EXPIRE_MINUTES = os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES")
 
@@ -56,17 +57,31 @@ def create_access_token(data:dict,expiry:timedelta):
     return encoded_jwt
 
 
-def get_db():
-    db = session_local()
+async def get_current_user(token:Annotated[str,Depends(auth_scheme)],db : Session=Depends(get_db)):
+    credential_exception = HTTPException(401,detail="Could Not Validate Credentials",headers={
+        "WWW-Authenticate":"Bearer",
+    })
     try:
-        yield db
-    finally:
-        db.close()
+        payload = jwt.decode(token,SECRET_KEY,ALGORITHM)
+        username :str = payload.get("sub")
+        if username is None:
+            raise credential_exception
+        token_data = TokenData(username=username)
+    except JWTError:
+        raise credential_exception
+    user = get_user(token_data.username,db)
+    if user is None:
+        raise credential_exception
+    return user
 
+
+async def get_current_active_user(current_user: Annotated[User,Depends(get_current_user)]):
+    if current_user.disabled:
+        raise HTTPException(400,detail="User is inactive")
+    return current_user
 
 @app.post('/login')
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    print(form_data)
     user = get_user(username=form_data.username, db=db)
     if not user:
         raise HTTPException(404, detail="User Not Found")
@@ -77,13 +92,18 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     return {"access_token": access_token, "token_type": "bearer"}
 
 ## create a user
-@app.post('/user')
+@app.post('/users')
 def create_user(user:UserCreate,db:Session=Depends(get_db)):
     new_user = models.User(username=user.username,password=get_hash_password(user.password))
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
     return new_user 
+
+
+@app.get('/users/me',response_model=User)
+async def read_users_me(current_user : Annotated[User,Depends(get_current_user)]):
+    return current_user
 
 
 
@@ -96,9 +116,18 @@ def create(request:Post,db:Session=Depends(get_db)):
     return new_post
 
 @app.get('/posts')
-def all_posts(db:Session=Depends(get_db)):
-    posts = db.query(models.Post).all()
-    return {'posts':posts}
+def all_posts(db:Session=Depends(get_db),token:str = Depends(auth_scheme)):
+    try:
+        payload = jwt.decode(token,SECRET_KEY,ALGORITHM)
+        username = payload["sub"]
+
+        user = get_user(username,db)
+        if user is None:
+            raise HTTPException(401,detail="Invalid Auth Credentials")
+        posts = db.query(models.Post).all()
+        return {'posts':posts}
+    except JWTError:
+        raise HTTPException(401,detail="Invalid login credentials")
 
 @app.delete('/blog/{blog_id}')
 def delete_post(blog_id:int,db:Session = Depends(get_db)):
